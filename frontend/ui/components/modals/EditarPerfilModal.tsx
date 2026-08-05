@@ -4,7 +4,8 @@ import React, { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2 } from "lucide-react";
+import { Loader2, Camera } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 interface EditarPerfilModalProps {
   open: boolean;
@@ -14,6 +15,7 @@ interface EditarPerfilModalProps {
     email: string;
     nroMatricula: string;
     escribaniaNombre: string;
+    avatar_url?: string;
   };
   onSave: (datos: {
     nombre: string;
@@ -21,6 +23,7 @@ interface EditarPerfilModalProps {
     nroMatricula: string;
     escribaniaNombre: string;
   }) => Promise<void>;
+  onSaveAvatar?: (file: File) => Promise<void>;
 }
 
 export function EditarPerfilModal({ open, onOpenChange, initialData, onSave }: EditarPerfilModalProps) {
@@ -36,14 +39,28 @@ export function EditarPerfilModal({ open, onOpenChange, initialData, onSave }: E
   const handleSave = async () => {
     setGuardando(true);
     try {
+      if (avatarFile && onSaveAvatar) {
+        await onSaveAvatar(avatarFile);
+      }
       await onSave(form);
+      setAvatarFile(null);
+      setAvatarPreview(null);
       onOpenChange(false);
     } catch (e: any) {
       console.error(e);
-      // The parent handles the toast, but we should re-throw or handle it. 
-      // Actually we just stop loading so the user isn't stuck.
     } finally {
       setGuardando(false);
+    }
+  };
+
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setAvatarFile(file);
+      setAvatarPreview(URL.createObjectURL(file));
     }
   };
 
@@ -58,6 +75,24 @@ export function EditarPerfilModal({ open, onOpenChange, initialData, onSave }: E
         </DialogHeader>
 
         <div className="space-y-4 py-4">
+          <div className="flex justify-center mb-6">
+            <div className="relative group cursor-pointer" onClick={() => document.getElementById("avatar-upload")?.click()}>
+              <Avatar className="h-20 w-20 border-2 border-border">
+                <AvatarImage src={avatarPreview || form.avatar_url || ""} />
+                <AvatarFallback className="text-xl">{form.nombre?.charAt(0) || "U"}</AvatarFallback>
+              </Avatar>
+              <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <Camera className="text-white h-6 w-6" />
+              </div>
+              <input 
+                id="avatar-upload"
+                type="file" 
+                className="hidden" 
+                accept="image/*"
+                onChange={handleAvatarChange}
+              />
+            </div>
+          </div>
           <div>
             <label className="text-sm font-medium text-foreground">
               Nombre completo

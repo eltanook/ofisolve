@@ -102,6 +102,34 @@ async def aprobar_tramite(
         "mensaje": "Trámite cerrado y archivado correctamente"
     }
 
+class MoverTramiteInput(BaseModel):
+    cliente_id_destino: Optional[int]
+
+@router.patch("/{tramite_id}/mover")
+async def mover_tramite(
+    tramite_id: int,
+    payload: MoverTramiteInput,
+    db: AsyncSession = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    """Mueve una carpeta (trámite) a otro cliente."""
+    from app.models.db_models import Tramite
+    from sqlalchemy import select
+    
+    stmt = select(Tramite).where(Tramite.id == tramite_id)
+    result = await db.execute(stmt)
+    tramite = result.scalars().first()
+    
+    if not tramite:
+        raise HTTPException(status_code=404, detail="Trámite no encontrado")
+        
+    if tramite.workspace_id != user.workspace_id:
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+        
+    tramite.cliente_id = payload.cliente_id_destino
+    await db.commit()
+    return {"status": "ok", "cliente_id": tramite.cliente_id}
+
 
 # ----------- PARTICIPACIONES -----------
 
@@ -158,14 +186,24 @@ async def ejecutar_auditoria_legal(tramite_id: int, db: AsyncSession = Depends(g
     doc_svc = DocumentService()
     textos = []
     
-    # Solo tomamos los primeros documentos para no saturar contexto
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=4000,
+        chunk_overlap=200,
+    )
+    
+    # Chunking semántico y lectura directa sin N+1
     for d in docs[:5]: 
         try:
-            contenido = await doc_svc.obtener_contenido(db, d.id)
-            if contenido:
-                textos.append(f"--- Documento: {d.nombre} ---\n{contenido[:5000]}") # 5000 chars por doc
-        except Exception:
-            pass
+            contenido = doc_svc.obtener_contenido_fisico(d)
+            if contenido and not contenido.startswith("[Error"):
+                chunks = text_splitter.split_text(contenido)
+                # Tomamos los primeros chunks preservando estructura
+                contenido_limitado = "\n".join(chunks[:2])
+                textos.append(f"--- Documento: {d.nombre} ---\n{contenido_limitado}")
+        except Exception as e:
+            logger.error(f"Error procesando documento {d.id} para auditoría: {e}")
+            raise HTTPException(status_code=500, detail="Error interno al procesar los documentos.")
             
     if not textos:
         return {"tramite_id": tramite_id, "clientes": [], "mensaje": "No se pudo leer el contenido de los documentos."}

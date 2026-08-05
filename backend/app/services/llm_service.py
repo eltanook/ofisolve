@@ -516,3 +516,6 @@ class LLMService:
     @property
     def is_mock(self) -> bool:
         return self._mock_mode
+        
+    def get_llm(self):
+        return self._llm

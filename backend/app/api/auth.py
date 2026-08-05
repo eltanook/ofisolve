@@ -1,10 +1,14 @@
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body, UploadFile, File
+from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import os
+import shutil
+import uuid
 
 from app.core.database import get_db
 from app.core.security import create_access_token, verify_password, get_password_hash
@@ -123,3 +127,41 @@ async def register(
     await db.commit()
     await db.refresh(nuevo_usuario)
     return _map_user(nuevo_usuario)
+
+UPLOAD_AVATAR_DIR = "uploads/avatars"
+if not os.path.exists(UPLOAD_AVATAR_DIR):
+    os.makedirs(UPLOAD_AVATAR_DIR)
+
+@router.post("/me/avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+) -> Any:
+    """Sube un avatar para el usuario autenticado."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No se envió ningún archivo")
+        
+    extension = file.filename.split(".")[-1].lower() if "." in file.filename else "png"
+    if extension not in ["jpg", "jpeg", "png", "gif", "webp"]:
+        raise HTTPException(status_code=400, detail="Formato no soportado")
+    
+    filename = f"{current_user.id}_{uuid.uuid4().hex}.{extension}"
+    file_path = os.path.join(UPLOAD_AVATAR_DIR, filename)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    avatar_url = f"/api/v1/auth/avatars/{filename}"
+    current_user.avatar_url = avatar_url
+    await db.commit()
+    await db.refresh(current_user)
+    
+    return {"avatar_url": avatar_url}
+
+@router.get("/avatars/{filename}")
+async def get_avatar(filename: str):
+    """Obtiene el avatar público"""
+    file_path = os.path.join(UPLOAD_AVATAR_DIR, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Avatar no encontrado")
+    return FileResponse(file_path)

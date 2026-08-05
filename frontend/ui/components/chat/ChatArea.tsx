@@ -26,7 +26,7 @@ interface ChatAreaProps {
   setMensajesChat: (m: MensajeChat[] | ((prev: MensajeChat[]) => MensajeChat[])) => void;
   inputMensaje: string;
   setInputMensaje: (val: string) => void;
-  enviarMensaje: () => void;
+  enviarMensaje: (overrideText?: string, fuentesIds?: number[]) => void;
   abortarMensaje: () => void;
   enviandoMensaje: boolean;
   isStreaming: boolean;
@@ -84,6 +84,8 @@ const ChatAreaComponent = ({
   onLimpiarChat,
 }: ChatAreaProps) => {
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const [fuentesAdjuntas, setFuentesAdjuntas] = React.useState<{id: number, nombre: string}[]>([]);
+  const [isDragOver, setIsDragOver] = React.useState(false);
 
   useEffect(() => {
     if (chatScrollRef.current) {
@@ -454,23 +456,69 @@ const ChatAreaComponent = ({
             </div>
           </div>
 
-          <div className="chat-input-container flex items-end gap-3 rounded-[28px] border border-border bg-card p-2.5 px-4 shadow-sm">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setDialogSubirDocumento(true)}
-              className="h-10 w-10 shrink-0 rounded-full hover:bg-accent text-muted-foreground"
-            >
-              <Plus className="h-5 w-5" />
-            </Button>
-            
-            <form 
-              className="flex-1 flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                enviarMensaje();
-              }}
-            >
+          <div 
+            className={cn(
+              "chat-input-container flex flex-col gap-2 rounded-[28px] border bg-card p-2.5 px-4 shadow-sm transition-all",
+              isDragOver ? "border-primary bg-primary/5 ring-4 ring-primary/10" : "border-border"
+            )}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragOver(true);
+            }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragOver(false);
+              const metaStr = e.dataTransfer.getData("documentoMeta");
+              if (metaStr) {
+                try {
+                  const meta = JSON.parse(metaStr);
+                  
+                  // Validar que el documento pertenezca al cliente actual
+                  if (tramiteActual && meta.tramiteId !== tramiteActual.id) {
+                    toast.error("Este documento no pertenece a la carpeta actual.");
+                    return;
+                  }
+                  
+                  if (!fuentesAdjuntas.find(f => f.id === meta.id)) {
+                    setFuentesAdjuntas(prev => [...prev, { id: meta.id, nombre: meta.nombre }]);
+                  }
+                } catch (err) {}
+              }
+            }}
+          >
+            {/* Chips de archivos adjuntos */}
+            {fuentesAdjuntas.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1 px-12">
+                {fuentesAdjuntas.map(f => (
+                  <Badge key={f.id} variant="secondary" className="bg-primary/10 text-primary hover:bg-primary/20 text-[10px] gap-1 pl-1.5 pr-1 py-0.5">
+                    <FilePlus2 className="h-3 w-3" />
+                    {f.nombre}
+                    <button onClick={() => setFuentesAdjuntas(prev => prev.filter(x => x.id !== f.id))} className="ml-1 rounded-full hover:bg-primary/20 p-0.5">
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+            <div className="flex items-end gap-3 w-full">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setDialogSubirDocumento(true)}
+                className="h-10 w-10 shrink-0 rounded-full hover:bg-accent text-muted-foreground"
+              >
+                <Plus className="h-5 w-5" />
+              </Button>
+              
+              <form 
+                className="flex-1 flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  enviarMensaje(undefined, fuentesAdjuntas.map(f => f.id));
+                  setFuentesAdjuntas([]);
+                }}
+              >
               <input
                 type="text"
                 placeholder={`Consultar sobre el cliente ${clienteActual.nombre_completo}...`}
@@ -500,6 +548,7 @@ const ChatAreaComponent = ({
                 </Button>
               )}
             </form>
+          </div>
           </div>
           <div className="mt-3 flex flex-col items-center justify-center gap-2 text-[10px] text-muted-foreground">
             <span className="text-xs font-medium text-foreground/70">

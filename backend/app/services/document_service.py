@@ -48,13 +48,21 @@ class DocumentService:
             
         import sys
         from pathlib import Path
-        # Determinar el BASE_DIR asumiendo que el archivo está en backend/app/services/document_service.py
-        BASE_DIR = Path(__file__).parent.parent.parent.parent
+        # Las rutas pueden estar guardadas relativas al root (ej. mock/) o relativas al backend (ej. uploads/)
+        backend_dir = Path(__file__).parent.parent.parent
+        root_dir = backend_dir.parent
         
-        # Si la ruta guardada es absoluta, se usa. Si es relativa, se anexa a BASE_DIR
         doc_path = doc.path
         if not os.path.isabs(doc_path):
-            doc_path = os.path.join(str(BASE_DIR), doc_path)
+            backend_path = os.path.join(str(backend_dir), doc_path)
+            root_path = os.path.join(str(root_dir), doc_path)
+            
+            if os.path.exists(backend_path):
+                doc_path = backend_path
+            elif os.path.exists(root_path):
+                doc_path = root_path
+            else:
+                doc_path = backend_path
             
         if not os.path.exists(doc_path):
             logger.warning(f"Archivo no encontrado en disco: {doc_path}")
@@ -62,6 +70,39 @@ class DocumentService:
 
         # Por ahora solo soportamos lectura de archivos de texto/planos para el LLM
         # En una versión pro extenderíamos con PDFMiner o similar
+        try:
+            with open(doc_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception as e:
+            logger.error(f"Error leyendo archivo {doc.path}: {e}")
+            return f"[Error: No se pudo leer el contenido del archivo {doc.nombre}]"
+
+    def obtener_contenido_fisico(self, doc: DocumentoLibreria) -> Optional[str]:
+        """Lee el contenido físico del archivo sin volver a consultar la BD (Evita N+1)."""
+        if not doc:
+            return None
+            
+        import sys
+        from pathlib import Path
+        backend_dir = Path(__file__).parent.parent.parent
+        root_dir = backend_dir.parent
+        
+        doc_path = doc.path
+        if not os.path.isabs(doc_path):
+            backend_path = os.path.join(str(backend_dir), doc_path)
+            root_path = os.path.join(str(root_dir), doc_path)
+            
+            if os.path.exists(backend_path):
+                doc_path = backend_path
+            elif os.path.exists(root_path):
+                doc_path = root_path
+            else:
+                doc_path = backend_path
+            
+        if not os.path.exists(doc_path):
+            logger.warning(f"Archivo no encontrado en disco: {doc_path}")
+            return f"[Error: El archivo físico '{doc.nombre}' no se encuentra en el servidor.]"
+
         try:
             with open(doc_path, "r", encoding="utf-8") as f:
                 return f.read()
@@ -81,11 +122,20 @@ class DocumentService:
             
         import sys
         from pathlib import Path
-        BASE_DIR = Path(__file__).parent.parent.parent.parent
+        backend_dir = Path(__file__).parent.parent.parent
+        root_dir = backend_dir.parent
         
         doc_path = doc.path
         if not os.path.isabs(doc_path):
-            doc_path = os.path.join(str(BASE_DIR), doc_path)
+            backend_path = os.path.join(str(backend_dir), doc_path)
+            root_path = os.path.join(str(root_dir), doc_path)
+            
+            if os.path.exists(backend_path):
+                doc_path = backend_path
+            elif os.path.exists(root_path):
+                doc_path = root_path
+            else:
+                doc_path = backend_path
             
         if not os.path.exists(doc_path):
             logger.error(f"El archivo físico {doc_path} no existe, se creará uno nuevo.")

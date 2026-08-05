@@ -1,5 +1,6 @@
 "use client"
 import Link from "next/link"
+import { useQuery } from "@tanstack/react-query"
 /**
  * =============================================================================
  * OFISOLVE - Sistema de IA para Escribanias Argentinas
@@ -74,6 +75,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { useTheme } from "next-themes"
 import { WelcomeHero } from "@/components/welcome-hero"
 import { ofisolveApi } from "@/lib/api"
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import type { 
   CertificacionResponse, 
   ClienteResponse, 
@@ -447,7 +449,7 @@ export default function OfiSolve() {
   const [documentoEditorArchivo, setDocumentoEditorArchivo] = useState<any>(null)
 
   /** Navegación Jerárquica */
-  const [expandedClienteId, setExpandedClienteId] = useState<number | null>(null)
+  const [clienteEditandoId, setClienteEditandoId] = useState<number | null>(null)
   const [showArchived, setShowArchived] = useState(false)
 
   // ---------------------------------------------------------------------------
@@ -494,7 +496,8 @@ export default function OfiSolve() {
     email: "", 
     telefono: "",
     nroMatricula: "",
-    escribaniaNombre: ""
+    escribaniaNombre: "",
+    avatar_url: ""
   })
   const [formContrasena, setFormContrasena] = useState({ actual: "", nueva: "", confirmar: "" })
   const [formWorkspace, setFormWorkspace] = useState({ nombre: "", descripcion: "" })
@@ -512,8 +515,12 @@ export default function OfiSolve() {
       setToken(storedToken)
       ofisolveApi.setToken(storedToken)
     }
+  }, [])
 
-    const checkOllama = async () => {
+  // Comprobación de estado de Ollama (Migrado a React Query)
+  useQuery({
+    queryKey: ["ollamaStatus"],
+    queryFn: async () => {
       try {
         const health = await ofisolveApi.checkHealth();
         setOllamaStatus(health?.ollama?.status || "unknown");
@@ -531,14 +538,14 @@ export default function OfiSolve() {
             console.error("No se pudieron obtener modelos", e);
           }
         }
+        return health;
       } catch (e) {
         setOllamaStatus("error");
+        return { ollama: { status: "error" } };
       }
-    };
-    checkOllama();
-    const interval = setInterval(checkOllama, 30000); // Check every 30s
-    return () => clearInterval(interval);
-  }, [])
+    },
+    refetchInterval: 30000, // Reemplaza al setInterval
+  })
 
 
   // Carga de perfil y datos globales
@@ -735,7 +742,8 @@ export default function OfiSolve() {
         email: usuario.email || "",
         telefono: usuario.telefono || "",
         nroMatricula: usuario.nroMatricula || "",
-        escribaniaNombre: usuario.escribaniaNombre || ""
+        escribaniaNombre: usuario.escribaniaNombre || "",
+        avatar_url: usuario.avatar_url || ""
       })
     }
   }, [usuario])
@@ -817,7 +825,7 @@ export default function OfiSolve() {
   /**
    * Envia un mensaje al chat e inicia el flujo de streaming SSE
    */
-  const enviarMensaje = useCallback(async (overrideText?: string) => {
+  const enviarMensaje = useCallback(async (overrideText?: string, fuentesIds?: number[]) => {
     const textoUsuario = overrideText || inputMensaje
     if (!textoUsuario?.trim() || enviandoMensaje || !clienteActual) return
     
@@ -933,7 +941,8 @@ export default function OfiSolve() {
           }
         },
         modoChat,
-        abortControllerRef.current.signal
+        abortControllerRef.current.signal,
+        fuentesIds
       )
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -1491,6 +1500,106 @@ export default function OfiSolve() {
     }
   }, [tramiteActual, workspaceActual]);
 
+  const handleMoverTramite = useCallback((tramiteId: number, clienteIdDestino: number) => {
+    // Buscar tramite para saber cliente origen
+    const tramiteAMover = tramites.find(t => t.id === tramiteId);
+    if (!tramiteAMover || tramiteAMover.clienteId === clienteIdDestino) return;
+    
+    const clienteIdOrigen = tramiteAMover.clienteId;
+
+    // Actualizacion optimista
+    setTramites(prev => prev.map(t => t.id === tramiteId ? { ...t, clienteId: clienteIdDestino } : t));
+    
+    let isUndone = false;
+    const timeoutId = setTimeout(async () => {
+       if (isUndone) return;
+       try {
+         await ofisolveApi.moverTramite(tramiteId, clienteIdDestino);
+       } catch (err: any) {
+         toast.error(`Error al mover carpeta: ${err.message}`);
+         // Revert
+         setTramites(prev => prev.map(t => t.id === tramiteId ? { ...t, clienteId: clienteIdOrigen } : t));
+       }
+    }, 10000);
+
+    toast.success("Carpeta movida a otro cliente", {
+       duration: 10000,
+       action: {
+         label: "Deshacer",
+         onClick: () => {
+           isUndone = true;
+           clearTimeout(timeoutId);
+           setTramites(prev => prev.map(t => t.id === tramiteId ? { ...t, clienteId: clienteIdOrigen } : t));
+           toast.info("Acción deshecha");
+         }
+       }
+    });
+  }, [tramites]);
+
+  const handleMoverDocumento = useCallback((docId: number, tramiteIdDestino: number) => {
+    // Identificar tramite origen
+    const tramiteOrigenStr = Object.keys(archivosPorTramite).find(tid => archivosPorTramite[Number(tid)]?.some(d => d.id === docId));
+    if (!tramiteOrigenStr) return;
+    const tramiteIdOrigen = Number(tramiteOrigenStr);
+    
+    if (tramiteIdOrigen === tramiteIdDestino) return;
+    
+    const docAMover = archivosPorTramite[tramiteIdOrigen].find(d => d.id === docId);
+    if (!docAMover) return;
+
+    // Actualizacion optimista
+    setArchivosPorTramite(prev => {
+      const prevOrigen = prev[tramiteIdOrigen] || [];
+      const prevDestino = prev[tramiteIdDestino] || [];
+      return {
+        ...prev,
+        [tramiteIdOrigen]: prevOrigen.filter(d => d.id !== docId),
+        [tramiteIdDestino]: [...prevDestino, docAMover]
+      };
+    });
+
+    let isUndone = false;
+    const timeoutId = setTimeout(async () => {
+      if (isUndone) return;
+      try {
+        await ofisolveApi.moverDocumento(docId, tramiteIdDestino);
+      } catch (err: any) {
+         toast.error("Error al mover documento");
+         // Revert
+         setArchivosPorTramite(prev => {
+           const currentOrigen = prev[tramiteIdOrigen] || [];
+           const currentDestino = prev[tramiteIdDestino] || [];
+           return {
+             ...prev,
+             [tramiteIdDestino]: currentDestino.filter(d => d.id !== docId),
+             [tramiteIdOrigen]: [...currentOrigen, docAMover]
+           };
+         });
+      }
+    }, 10000);
+
+    toast.success("Documento movido", {
+       duration: 10000,
+       action: {
+         label: "Deshacer",
+         onClick: () => {
+           isUndone = true;
+           clearTimeout(timeoutId);
+           setArchivosPorTramite(prev => {
+             const currentOrigen = prev[tramiteIdOrigen] || [];
+             const currentDestino = prev[tramiteIdDestino] || [];
+             return {
+               ...prev,
+               [tramiteIdDestino]: currentDestino.filter(d => d.id !== docId),
+               [tramiteIdOrigen]: [...currentOrigen, docAMover]
+             };
+           });
+           toast.info("Acción deshecha");
+         }
+       }
+    });
+  }, [archivosPorTramite])
+
   const handleExploreKnowledge = useCallback(async () => {
     if (!workspaceActual) {
       toast.error("Debe seleccionar un workspace primero");
@@ -1731,7 +1840,7 @@ export default function OfiSolve() {
           <div className="lg:hidden flex items-center">
             <Sheet>
               <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground">
+                <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0 rounded-md lg:hidden" onClick={() => setSidebarAbierto(!sidebarAbierto)}>
                   <Menu className="h-5 w-5" />
                 </Button>
               </SheetTrigger>
@@ -1745,8 +1854,7 @@ export default function OfiSolve() {
                   setClienteActual={setClienteActual}
                   tramiteActual={tramiteActual}
                   setTramiteActual={setTramiteActual}
-                  expandedClienteId={expandedClienteId}
-                  setExpandedClienteId={setExpandedClienteId}
+                  setClienteEditandoId={setClienteEditandoId}
                   setIsNuevoClienteOpen={setIsNuevoClienteOpen}
                   setIsNuevoTramiteOpen={setDialogNuevoTramite}
                   archivosPorTramite={archivosPorTramite}
@@ -1783,7 +1891,7 @@ export default function OfiSolve() {
           {/* Logo */}
           <div className="flex items-center gap-2">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-background shadow-sm ring-1 ring-border overflow-hidden">
-              <img src="/logo-ofisolve.png" alt="OfiSolve Logo" className="h-7 w-7 object-contain" />
+              <img src="/logo-ofisolve.png" alt="OfiSolve Logo" className="h-7 w-7 object-contain dark:brightness-0 dark:invert" />
             </div>
             <span className="hidden text-lg font-bold tracking-tight text-foreground sm:inline">
               OfiSolve
@@ -1796,7 +1904,7 @@ export default function OfiSolve() {
           {/* Selector de Workspace */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="hidden gap-2 rounded-lg sm:flex">
+              <Button variant="ghost" className="hidden h-9 items-center gap-2 rounded-md sm:flex px-3">
                 <div 
                   className="h-2 w-2 rounded-full bg-primary/60" 
                 />
@@ -1884,7 +1992,7 @@ export default function OfiSolve() {
                   onFocus={() => {
                     if (globalSearchQuery.length >= 2) setShowGlobalSearch(true)
                   }}
-                  className="w-full pl-10 pr-4 py-2 h-10 border border-border/50 rounded-xl bg-muted/30 text-foreground placeholder-muted-foreground focus-visible:ring-1 focus-visible:ring-primary focus-visible:bg-background hover:bg-muted/50 transition-all shadow-inner"
+                  className="w-full pl-10 pr-4 py-2 h-9 border border-border/50 rounded-md bg-muted/30 text-foreground placeholder-muted-foreground focus-visible:ring-1 focus-visible:ring-primary focus-visible:bg-background hover:bg-muted/50 transition-all shadow-inner"
                 />
               </div>
             </PopoverTrigger>
@@ -1985,8 +2093,8 @@ export default function OfiSolve() {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button 
-                    variant="outline" 
-                    className="h-8 rounded-full bg-background/50 border-border/60 hover:border-primary/50 hover:bg-accent/30 text-[11px] font-medium shadow-sm backdrop-blur-sm transition-all duration-200 gap-2 px-4"
+                    variant="outline"
+                    className="h-9 rounded-md bg-background/50 border-border/60 hover:border-primary/50 hover:bg-accent/30 text-[11px] font-medium shadow-sm backdrop-blur-sm transition-all duration-200 gap-2 px-4"
                   >
                     <Sparkles className="h-3.5 w-3.5 text-primary" />
                     {modeloActivo?.includes("llama") ? "Llama 3.1 (El más potente)" : modeloActivo?.includes("qwen") ? "Qwen 2.5 (Más rápido)" : modeloActivo}
@@ -2054,10 +2162,10 @@ export default function OfiSolve() {
           {modoChat === "creador" && (
             <Button
               variant="ghost"
-              size="sm"
+              size="icon"
               onClick={() => setPanelDerechoVisible(!panelDerechoVisible)}
               className={cn(
-                "hidden rounded-lg lg:flex mr-2",
+                "hidden h-9 w-9 rounded-md lg:flex mr-2",
                 panelDerechoVisible && "bg-accent"
               )}
               aria-label={panelDerechoVisible ? "Ocultar panel de trabajo" : "Mostrar panel de trabajo"}
@@ -2073,7 +2181,7 @@ export default function OfiSolve() {
           {/* Menú de Herramientas Avanzadas */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="gap-2 rounded-lg mr-2">
+              <Button variant="ghost" className="h-9 gap-2 rounded-md px-3 mr-2">
                 <LayoutGrid className="h-4 w-4 text-muted-foreground" />
                 <span className="hidden sm:inline text-sm font-medium">Más</span>
               </Button>
@@ -2130,10 +2238,13 @@ export default function OfiSolve() {
           {/* Menu Usuario */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="gap-2 rounded-lg">
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <User className="h-4 w-4" />
-                </div>
+              <Button variant="ghost" className="flex items-center gap-2 pl-2 pr-3 shrink-0 h-9 rounded-md transition-colors hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-primary/50">
+                <Avatar className="h-6 w-6">
+                  <AvatarImage src={usuario?.avatar_url || ""} />
+                  <AvatarFallback className="bg-primary/10 text-primary text-[10px]">
+                    <User className="h-3 w-3" />
+                  </AvatarFallback>
+                </Avatar>
                 <span className="hidden max-w-[120px] truncate text-sm font-medium lg:inline">
                   {usuario?.nombre_completo || usuario?.nombre || "Usuario"}
                 </span>
@@ -2200,8 +2311,7 @@ export default function OfiSolve() {
                   setClienteActual={setClienteActual}
                   tramiteActual={tramiteActual}
                   setTramiteActual={setTramiteActual}
-                  expandedClienteId={expandedClienteId}
-                  setExpandedClienteId={setExpandedClienteId}
+                  setClienteEditandoId={setClienteEditandoId}
                   setIsNuevoClienteOpen={setIsNuevoClienteOpen}
                   setIsNuevoTramiteOpen={setDialogNuevoTramite}
                   archivosPorTramite={archivosPorTramite}
@@ -2215,6 +2325,8 @@ export default function OfiSolve() {
                     setActiveGlobalChatTitle(title)
                     setGlobalChatOpen(true)
                   }}
+                  onMoverTramite={handleMoverTramite}
+                  onMoverDocumento={handleMoverDocumento}
                 />
               </ResizablePanel>
               <ResizableHandle withHandle className="hidden lg:flex" />
@@ -2630,6 +2742,11 @@ export default function OfiSolve() {
         open={dialogEditarPerfil}
         onOpenChange={setDialogEditarPerfil}
         initialData={formPerfil}
+        onSaveAvatar={async (file) => {
+          const res = await ofisolveApi.subirAvatar(file);
+          setUsuario(prev => prev ? ({ ...prev, avatar_url: res.avatar_url }) : null);
+          setFormPerfil(prev => ({ ...prev, avatar_url: res.avatar_url }));
+        }}
         onSave={async (datos) => {
           const updatedUser = await ofisolveApi.actualizarPerfil({
             nombre_completo: datos.nombre,
@@ -2699,7 +2816,7 @@ export default function OfiSolve() {
         isOpen={isNuevoClienteOpen} 
         onClose={() => setIsNuevoClienteOpen(false)}
         workspaceId={Number(workspaceActual?.id)}
-        cliente={expandedClienteId ? clientes.find(c => c.id === expandedClienteId) : undefined}
+        cliente={clienteEditandoId ? clientes.find(c => c.id === clienteEditandoId) : undefined}
         onSuccess={(nuevoCliente: any) => {
           setClientes(prev => {
             const exists = prev.find(c => c.id === nuevoCliente.id)

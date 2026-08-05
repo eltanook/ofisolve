@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 REM Si el script recibe el argumento --ollama, ejecuta solo Ollama
 if "%1"=="--ollama" (
     TITLE OfiSolve - Ollama
-    echo Iniciando Motor de IA (Ollama)...
+    echo Iniciando Motor de IA ^(Ollama^)...
     ollama serve
     echo.
     echo Ollama se cerro.
@@ -15,7 +15,7 @@ if "%1"=="--ollama" (
 REM Si el script recibe el argumento --backend, ejecuta solo el Backend
 if "%1"=="--backend" (
     TITLE OfiSolve - Backend
-    echo Esperando a que la IA (Ollama) este disponible...
+    echo Esperando a que la IA ^(Ollama^) este disponible...
     set RETRIES=0
     :loop_ia
     curl -s http://localhost:11434 > NUL 2>&1
@@ -26,7 +26,7 @@ if "%1"=="--backend" (
             pause
             exit /b 1
         )
-        timeout /t 2 /nobreak > NUL
+        ping 127.0.0.1 -n 3 > nul
         goto loop_ia
     )
     echo [OK] IA disponible! Iniciando Backend...
@@ -53,7 +53,7 @@ if "%1"=="--frontend" (
             pause
             exit /b 1
         )
-        timeout /t 2 /nobreak > NUL
+        ping 127.0.0.1 -n 3 > nul
         goto loop_be
     )
     echo [OK] Backend disponible! Iniciando Frontend...
@@ -69,16 +69,18 @@ REM =========================================================================
 REM Lógica Principal: Abrir Windows Terminal con 3 pestañas
 REM =========================================================================
 
-echo Iniciando OfiSolve en Windows Terminal (wt)...
-wt -d . cmd /k "%~f0" --ollama ; new-tab -d . cmd /k "%~f0" --backend ; new-tab -d . cmd /k "%~f0" --frontend
+echo Iniciando OfiSolve en multiples ventanas (CMD)...
+start "OfiSolve - Ollama" cmd /k "%~f0" --ollama
+start "OfiSolve - Backend" cmd /k "%~f0" --backend
+start "OfiSolve - Frontend" cmd /k "%~f0" --frontend
 
 echo.
 echo =========================================
-echo OfiSolve se esta iniciando en una nueva
-echo ventana de Windows Terminal con pestañas.
+echo OfiSolve se esta iniciando en nuevas
+echo ventanas de CMD.
 echo =========================================
 echo.
-echo Abriendo el navegador en 10 segundos...
-timeout /t 10 /nobreak > NUL
+echo Abriendo el navegador en 45 segundos...
+ping 127.0.0.1 -n 46 > nul
 start http://localhost:3000
 exit

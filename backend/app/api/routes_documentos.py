@@ -155,6 +155,7 @@ class ChatInput(BaseModel):
     history: Optional[List[Dict[str, str]]] = []
     modelo: Optional[str] = None
     modo: Optional[str] = "consultas"  # 'consultas' | 'creador'
+    fuentes_ids: Optional[List[int]] = []
 
 NODE_MESSAGES = {
     "ofuscar": "Protegiendo tus datos confidenciales...",
@@ -174,6 +175,7 @@ async def graph_event_generator(
     documento_id: Optional[int] = None,
     modelo_ia: Optional[str] = None,
     modo: str = "consultas",
+    fuentes_ids: Optional[List[int]] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Generador SSE con Soporte de Memoria por Documento.
@@ -247,6 +249,22 @@ async def graph_event_generator(
                     tramites = res.scalars().all()
                     cliente_tramites = [t.id for t in tramites]
                 
+                # Cargar FUENTES EXPRESAMENTE ADJUNTAS
+                contexto_fuentes = ""
+                if fuentes_ids:
+                    from app.models.db_models import DocumentoLibreria
+                    stmt_fuentes = select(DocumentoLibreria).where(DocumentoLibreria.id.in_(fuentes_ids))
+                    res_fuentes = await session.execute(stmt_fuentes)
+                    docs_fuentes = res_fuentes.scalars().all()
+                    textos_fuentes = []
+                    for d in docs_fuentes:
+                        contenido = await doc_svc.obtener_contenido(session, d.id)
+                        if contenido and not contenido.startswith("[Error"):
+                            textos_fuentes.append(f"DOCUMENTO ADJUNTO: {d.nombre}\nCONTENIDO:\n{contenido}")
+                    if textos_fuentes:
+                        contexto_fuentes = "--- FUENTES EXPRESAMENTE ADJUNTAS POR EL USUARIO ---\n" + "\n\n".join(textos_fuentes) + "\n\n"
+                        logger.info(f"Cargadas {len(textos_fuentes)} fuentes expresas para el LLM.")
+
                 if tramite_id or cliente_tramites:
                     # HyDE: Expandir query si es corta
                     query_busqueda = mensaje
@@ -295,6 +313,10 @@ async def graph_event_generator(
                         # Añadir al inicio del RAG
                         contexto_rag = f"--- DOCUMENTOS ACTUALES ---\\n{contexto_vivo}\\n\\n--- NORMATIVA / OTROS ANTECEDENTES ---\\n{contexto_rag}"
                 
+                # Prepend fuentes explicitas
+                if contexto_fuentes:
+                    contexto_rag = contexto_fuentes + contexto_rag
+                    
                 # Aplicar compresión inteligente para ahorrar contexto y prevenir OOM
                 if contexto_rag:
                     contexto_rag = context_compressor.compress(contexto_rag)
@@ -392,7 +414,7 @@ async def graph_event_generator(
                                 if sugerencias:
                                     yield f"data: {json.dumps({'event': 'sugerencias', 'opciones': sugerencias})}\n\n"
                     elif name == "LangGraph":
-                        yield f"data: {json.dumps({'event': 'finalizado', 'data': 'Proceso completado'})}\n\n"
+                        pass # Prevent sending duplicate finalizado event
 
     except asyncio.TimeoutError:
         logger.error("[SSE Error] Timeout de IA excedido (120s)")
@@ -448,6 +470,7 @@ async def chat_documento_stream(
             documento_id=documento_id,
             modelo_ia=payload.modelo,
             modo=payload.modo or "consultas",
+            fuentes_ids=payload.fuentes_ids
         ),
         headers=headers
     )

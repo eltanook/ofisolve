@@ -100,6 +100,24 @@ async def stream_chat_sesion(session_id: int, payload: dict, db: AsyncSession = 
 
     mensaje_texto = payload.get("mensaje", "")
     history = payload.get("history", [])
+    fuentes_ids = payload.get("fuentes_ids", [])
+    
+    # Cargar contenido de fuentes si se enviaron
+    texto_fuentes = ""
+    if fuentes_ids:
+        from app.models.db_models import DocumentoLibreria
+        from app.services.document_service import DocumentService
+        doc_svc = DocumentService()
+        stmt_fuentes = select(DocumentoLibreria).where(DocumentoLibreria.id.in_(fuentes_ids))
+        res_fuentes = await db.execute(stmt_fuentes)
+        docs_fuentes = res_fuentes.scalars().all()
+        textos = []
+        for d in docs_fuentes:
+            contenido = await doc_svc.obtener_contenido(db, d.id)
+            if contenido and not contenido.startswith("[Error"):
+                textos.append(f"DOCUMENTO ADJUNTO: {d.nombre}\nCONTENIDO:\n{contenido}")
+        if textos:
+            texto_fuentes = "--- FUENTES EXPRESAMENTE ADJUNTAS POR EL USUARIO ---\n" + "\n\n".join(textos) + "\n\n"
 
     # Reconstruir historial
     messages = []
@@ -110,8 +128,13 @@ async def stream_chat_sesion(session_id: int, payload: dict, db: AsyncSession = 
         elif msg["role"] == "assistant":
             messages.append(AIMessage(content=msg["contenido"]))
     
-    # Agregar el nuevo mensaje
-    messages.append(HumanMessage(content=mensaje_texto))
+    # Agregar el nuevo mensaje con las fuentes si existen
+    if texto_fuentes:
+        mensaje_final = f"{texto_fuentes}\n{mensaje_texto}"
+    else:
+        mensaje_final = mensaje_texto
+        
+    messages.append(HumanMessage(content=mensaje_final))
 
     agent = get_global_client_agent()
     config = {"configurable": {"thread_id": f"global_client_{session_id}"}}

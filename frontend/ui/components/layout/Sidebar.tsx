@@ -19,8 +19,7 @@ interface SidebarProps {
   setTramiteActual: (tramite: Tramite | null) => void;
   documentoActual: DocumentoFuente | null;
   setDocumentoActual: (documento: DocumentoFuente | null) => void;
-  expandedClienteId: number | null;
-  setExpandedClienteId: (id: number | null) => void;
+  setClienteEditandoId: (id: number | null) => void;
   setIsNuevoClienteOpen: (open: boolean) => void;
   setIsNuevoTramiteOpen: (open: boolean) => void;
   onMoverTramite?: (tramiteId: number, nuevoClienteId: number) => void;
@@ -42,8 +41,7 @@ export function Sidebar({
   setTramiteActual,
   documentoActual,
   setDocumentoActual,
-  expandedClienteId,
-  setExpandedClienteId,
+  setClienteEditandoId,
   setIsNuevoClienteOpen,
   setIsNuevoTramiteOpen,
   onMoverTramite,
@@ -57,7 +55,9 @@ export function Sidebar({
   const [showArchived, setShowArchived] = useState(false);
   const [busqueda, setBusqueda] = useState("");
   const [chatSessions, setChatSessions] = useState<any[]>([]);
-  const [isChatsExpanded, setIsChatsExpanded] = useState(true);
+  const [isChatsExpanded, setIsChatsExpanded] = React.useState(true);
+  const [expandedClients, setExpandedClients] = React.useState<number[]>([]);
+  const [expandedTramites, setExpandedTramites] = React.useState<number[]>([]);
   const [isHerramientasExpanded, setIsHerramientasExpanded] = useState(true);
   const [isClientesExpanded, setIsClientesExpanded] = useState(true);
 
@@ -210,7 +210,7 @@ export function Sidebar({
       </div>
 
       {/* Clientes y Carpetas */}
-      <div className="shrink-0 px-2 py-2 border-b border-border">
+      <div className={cn("shrink-0 px-2 py-2 transition-colors", !isClientesExpanded && "border-b border-border")}>
         <div 
           className="flex items-center justify-between px-2 py-1.5 cursor-pointer rounded-lg hover:bg-accent group transition-colors"
           onClick={() => setIsClientesExpanded(!isClientesExpanded)}
@@ -267,7 +267,7 @@ export function Sidebar({
           )}
           
           {clientesFiltrados.map((cliente) => {
-            const isExpanded = expandedClienteId === cliente.id;
+            const isExpanded = expandedClients.includes(cliente.id);
             const isSelected = clienteActual?.id === cliente.id;
             
             return (
@@ -282,14 +282,18 @@ export function Sidebar({
                   e.preventDefault();
                   const tramiteId = e.dataTransfer.getData("tramiteId");
                   if (tramiteId && onMoverTramite) {
-                    onMoverTramite(Number(tramiteId), cliente.id);
+                    if (window.confirm(`¿Estás seguro que deseas mover esta carpeta al cliente ${cliente.nombre_completo}?`)) {
+                      onMoverTramite(Number(tramiteId), cliente.id);
+                    }
                   }
                 }}
               >
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => {
-                      setExpandedClienteId(isExpanded ? null : cliente.id);
+                      setExpandedClients(prev => 
+                        isExpanded ? prev.filter(id => id !== cliente.id) : [...prev, cliente.id]
+                      );
                       setClienteActual(cliente);
                     }}
                     className={cn(
@@ -323,8 +327,8 @@ export function Sidebar({
                       title="Editar Cliente"
                       onClick={(e) => {
                         e.stopPropagation();
-                        // Al hacer clic, nos aseguramos que este es el cliente expandido
-                        setExpandedClienteId(cliente.id); 
+                        // Al hacer clic, nos aseguramos que este es el cliente que se va a editar
+                        setClienteEditandoId(cliente.id); 
                         setIsNuevoClienteOpen(true);
                       }}
                     >
@@ -353,7 +357,9 @@ export function Sidebar({
                               e.preventDefault();
                               const docId = e.dataTransfer.getData("documentoId");
                               if (docId && onMoverDocumento) {
-                                onMoverDocumento(Number(docId), tramite.id);
+                                if (window.confirm(`¿Estás seguro que deseas mover este archivo a la carpeta ${tramite.nombre}?`)) {
+                                  onMoverDocumento(Number(docId), tramite.id);
+                                }
                                 return;
                               }
                               
@@ -377,6 +383,7 @@ export function Sidebar({
                             }}
                             onClick={() => {
                               setTramiteActual(tramite);
+                              setExpandedTramites(prev => prev.includes(tramite.id) ? prev.filter(id => id !== tramite.id) : [...prev, tramite.id]);
                               // Cargar archivos al hacer click
                               if (!archivosPorTramite[tramite.id]) {
                                 ofisolveApi.obtenerArchivosTramite(tramite.id)
@@ -387,7 +394,7 @@ export function Sidebar({
                             className={cn(
                               "flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-left text-xs transition-all group/item",
                               isTramiteSelected
-                                ? "bg-primary text-primary-foreground font-medium shadow-sm"
+                                ? "bg-primary/10 text-primary font-medium"
                                 : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
                             )}
                           >
@@ -398,7 +405,7 @@ export function Sidebar({
                           </button>
 
                           {/* Archivos del trámite */}
-                          {isTramiteSelected && archivos.length > 0 && (
+                          {expandedTramites.includes(tramite.id) && archivos.length > 0 && (
                             <div className="ml-4 mt-1 flex flex-col gap-0.5 border-l border-primary/20 pl-2 animate-in fade-in duration-200">
                               {archivos.map(archivo => (
                                 <button
@@ -407,6 +414,7 @@ export function Sidebar({
                                   onDragStart={(e) => {
                                     e.stopPropagation();
                                     e.dataTransfer.setData("documentoId", archivo.id.toString());
+                                    e.dataTransfer.setData("documentoMeta", JSON.stringify({ id: archivo.id, nombre: archivo.nombre, tramiteId: tramite.id }));
                                   }}
                                   onClick={async () => {
                                     setDocumentoActual(archivo);
@@ -472,7 +480,9 @@ export function Sidebar({
                           e.preventDefault();
                           const docId = e.dataTransfer.getData("documentoId");
                           if (docId && onMoverDocumento) {
-                            onMoverDocumento(Number(docId), tramite.id);
+                            if (window.confirm(`¿Estás seguro que deseas mover este archivo a la carpeta ${tramite.nombre}?`)) {
+                              onMoverDocumento(Number(docId), tramite.id);
+                            }
                             return;
                           }
                           

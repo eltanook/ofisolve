@@ -25,6 +25,7 @@ export const metadata: Metadata = {
 }
 
 import { Toaster } from "sonner"
+import QueryProvider from "@/components/query-provider"
 
 export default function RootLayout({
   children,
@@ -40,8 +41,10 @@ export default function RootLayout({
           enableSystem
           storageKey="ofisolve-theme"
         >
-          {children}
-          <Toaster position="top-right" richColors />
+          <QueryProvider>
+            {children}
+            <Toaster position="top-right" richColors />
+          </QueryProvider>
         </ThemeProvider>
       </body>
     </html>

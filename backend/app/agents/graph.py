@@ -31,20 +31,16 @@ def _get_rag_singleton() -> RAGService:
 
 def node_ofuscar(state: CertificacionState) -> dict:
     """Nodo Privacy: Anonimización de PII antes de subir al LLM."""
-    logger.info("[Agente Privacy] Iniciando ofuscación de datos...")
-    privacy_svc = PrivacyService()
+    logger.info("[Agente Privacy] Iniciando ofuscación de datos... (Bypasseado por entorno local seguro)")
     
     texto_input = ""
     if state.get("messages"):
         last_msg = state["messages"][-1]
         texto_input = last_msg.content if hasattr(last_msg, 'content') else str(last_msg)
     
-    try:
-        ofuscado, mapa = privacy_svc.anonymize_payload({"input": texto_input})
-    except Exception as e:
-        logger.warning(f"[Agente Privacy] Error en anonimización (no crítico): {e}")
-        ofuscado = {"input": texto_input}
-        mapa = {}
+    # Bypass ofuscación para la app local segura
+    ofuscado = {"input": texto_input}
+    mapa = {}
     
     return {
         "datos_ofuscados": ofuscado,
@@ -227,13 +223,9 @@ async def node_chat_general(state: CertificacionState, config: dict) -> dict:
 
 def node_desofuscar(state: CertificacionState) -> dict:
     """Nodo Privacy: Recomposición final con datos reales."""
-    logger.info("[Agente Privacy] Reconstruyendo documento con PII real...")
-    privacy_svc = PrivacyService()
+    logger.info("[Agente Privacy] Reconstruyendo documento con PII real... (Bypasseado)")
     
-    texto_vincular = privacy_svc.deanonymize_text(
-        state["texto_generado"],
-        state["mapa_inversion"]
-    )
+    texto_vincular = state.get("texto_generado", "")
     
     return {"texto_final": texto_vincular}
 

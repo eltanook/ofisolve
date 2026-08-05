@@ -104,6 +104,15 @@ class OfiSolveApi {
     });
   }
 
+  async subirAvatar(file: File): Promise<any> {
+    const formData = new FormData();
+    formData.append("file", file);
+    return this.request("/auth/me/avatar", {
+      method: "POST",
+      body: formData
+    });
+  }
+
   // --- WORKSPACES ---
   async obtenerWorkspaces(): Promise<any[]> {
     return this.request("/workspaces/");
@@ -128,6 +137,13 @@ class OfiSolveApi {
 
   async actualizarTramite(tramiteId: number, data: any): Promise<any> {
     return this.request(`/workspaces/tramites/${tramiteId}`, { method: "PATCH", body: JSON.stringify(data) });
+  }
+
+  async moverTramite(tramiteId: number, clienteIdDestino: number): Promise<void> {
+    await this.request(`/tramites/${tramiteId}/mover`, {
+      method: 'PATCH',
+      body: JSON.stringify({ cliente_id_destino: clienteIdDestino }),
+    });
   }
 
   async aprobarTramite(tramiteId: number, contenido: string): Promise<any> {
@@ -323,7 +339,8 @@ class OfiSolveApi {
     modelo?: string,
     onEvent?: (event: any) => void,
     modo: string = "consultas",
-    abortSignal?: AbortSignal
+    abortSignal?: AbortSignal,
+    fuentesIds?: number[]
   ): Promise<void> {
     const url = `${BASE_URL}/documentos/chat/`;
     const payload: any = {
@@ -335,6 +352,9 @@ class OfiSolveApi {
     };
     if (modelo) {
       payload.modelo = modelo;
+    }
+    if (fuentesIds && fuentesIds.length > 0) {
+      payload.fuentes_ids = fuentesIds;
     }
 
     const response = await fetch(url, {
@@ -430,10 +450,17 @@ class OfiSolveApi {
     return res.modelos || [];
   }
 
-  async guardarContenidoDocumento(docId: number, contenido: string): Promise<void> {
-    await this.request(`/tramites/documentos/${docId}/guardar`, {
+  async guardarContenidoDocumento(docId: number, contenido: string): Promise<any> {
+    return this.request(`/tramites/documentos/${docId}/guardar`, {
       method: 'POST',
       body: JSON.stringify({ contenido }),
+    });
+  }
+
+  async moverDocumento(docId: number, tramiteIdDestino: number): Promise<void> {
+    await this.request(`/documentos/${docId}/mover`, {
+      method: 'PATCH',
+      body: JSON.stringify({ tramite_id_destino: tramiteIdDestino }),
     });
   }
 
