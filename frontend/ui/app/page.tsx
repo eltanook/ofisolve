@@ -2736,6 +2736,18 @@ export default function OfiSolve() {
         onOpenChange={setDialogConfiguracion}
         onOpenPerfil={() => setDialogEditarPerfil(true)}
         onOpenContrasena={() => setDialogCambiarContrasena(true)}
+        workspaceActual={workspaceActual}
+        onUpdateJurisdiccion={async (val: string) => {
+          if (!workspaceActual) return;
+          try {
+            await ofisolveApi.actualizarWorkspace(workspaceActual.id, { jurisdiccion: val });
+            setWorkspaces(prev => prev.map(w => w.id === workspaceActual.id ? { ...w, jurisdiccion: val } : w));
+            setWorkspaceActual({ ...workspaceActual, jurisdiccion: val });
+            toast.success("Jurisdicción del workspace actualizada");
+          } catch (error: any) {
+            toast.error("Error al actualizar la jurisdicción");
+          }
+        }}
       />
 
       <EditarPerfilModal

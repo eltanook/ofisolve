@@ -188,8 +188,9 @@ async def ejecutar_auditoria_legal(tramite_id: int, db: AsyncSession = Depends(g
     
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=4000,
-        chunk_overlap=200,
+        chunk_size=1500,
+        chunk_overlap=300,
+        separators=["\n\nCLÁUSULA", "\n\nARTÍCULO", "\n\n", "\n", ". ", " "]
     )
     
     # Chunking semántico y lectura directa sin N+1

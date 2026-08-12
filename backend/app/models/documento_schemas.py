@@ -17,3 +17,20 @@ class DocumentoLibreriaResponse(DocumentoLibreriaBase):
 
     class Config:
         from_attributes = True
+
+class DocumentoVersionBase(BaseModel):
+    version: int
+    comentario: Optional[str] = None
+    path_archivo: str
+
+class DocumentoVersionCreate(DocumentoVersionBase):
+    pass
+
+class DocumentoVersionResponse(DocumentoVersionBase):
+    id: int
+    documento_id: int
+    autor_id: Optional[int] = None
+    timestamp: datetime
+
+    class Config:
+        from_attributes = True

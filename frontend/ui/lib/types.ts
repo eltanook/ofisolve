@@ -62,6 +62,7 @@ export interface ClienteResponse extends ClienteBase {
 export interface WorkspaceBase {
   nombre: string
   descripcion?: string
+  jurisdiccion?: string
 }
 
 export interface WorkspaceCreate extends WorkspaceBase {}

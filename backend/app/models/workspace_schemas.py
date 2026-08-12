@@ -142,6 +142,7 @@ class ClienteResponse(ClienteBase):
 class WorkspaceBase(BaseModel):
     nombre: str
     descripcion: Optional[str] = None
+    jurisdiccion: Optional[str] = None
 
 class WorkspaceCreate(WorkspaceBase):
     pass

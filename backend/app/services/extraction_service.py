@@ -69,9 +69,20 @@ class ExtractorService:
 
         try:
             # 1. Llamada al LLM con salida estructurada
-            resultado_pydantic: ExtraccionNotarial = await self.extractor.ainvoke(
-                f"Analiza el siguiente documento notarial y extrae los datos relevantes:\n\n{texto}"
-            )
+            prompt_template = f"""
+Eres un experto notarial argentino. Analiza el siguiente documento y extrae los datos requeridos.
+REGLAS ESTRICTAS:
+- Extrae únicamente personas (físicas o jurídicas) que sean partes principales.
+- Si no encuentras un dato (ej. domicilio), déjalo como null, no inventes.
+
+EJEMPLO:
+Texto: "Comparece JUAN PEREZ, DNI 12.345.678, soltero, domiciliado en Mitre 123, VENDEDOR..."
+Salida: {{"tipo_acto": "Compraventa", "personas": [{{"nombre": "JUAN PEREZ", "dni_cuit": "12345678", "rol": "VENDEDOR", "tipo_persona": "Fisica", "domicilio": "Mitre 123", "email": null, "telefono": null}}]}}
+
+DOCUMENTO A ANALIZAR:
+{texto}
+"""
+            resultado_pydantic: ExtraccionNotarial = await self.extractor.ainvoke(prompt_template)
             
             if not resultado_pydantic:
                 logger.warning("[ExtractorService] No se pudieron extraer datos.")
@@ -159,9 +170,16 @@ class ExtractorService:
         logger.info("[ExtractorService] Ejecutando Auditoría Legal sobre documentos...")
         
         try:
-            resultado_pydantic: ExtraccionNotarial = await self.extractor.ainvoke(
-                f"Analiza los siguientes documentos y extrae todas las personas/entidades mencionadas y sus roles:\n\n{texto}"
-            )
+            prompt_template = f"""
+Eres un auditor notarial experto. Analiza el siguiente conjunto de documentos y extrae todas las personas/entidades mencionadas y sus roles.
+REGLAS ESTRICTAS:
+- Extrae únicamente entidades relevantes para el acto notarial.
+- Si una persona actúa en representación de otra, identifica correctamente a ambas.
+
+DOCUMENTOS A ANALIZAR:
+{texto}
+"""
+            resultado_pydantic: ExtraccionNotarial = await self.extractor.ainvoke(prompt_template)
             
             if not resultado_pydantic:
                 return {"clientes": []}

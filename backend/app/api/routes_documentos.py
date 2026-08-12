@@ -520,3 +520,81 @@ async def unlock_document(documento_id: int, db: AsyncSession = Depends(get_db),
         doc.locked_at = None
         await db.commit()
     return {"status": "unlocked"}
+
+# ----------- CONTROL DE VERSIONES Y AUDITORÍA PREVIA -----------
+
+from app.models.documento_schemas import DocumentoVersionResponse, DocumentoVersionCreate
+
+@router.get("/{documento_id}/versiones", response_model=List[DocumentoVersionResponse])
+async def obtener_versiones(
+    documento_id: int, 
+    db: AsyncSession = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    """
+    Obtiene el historial inmutable de versiones de un documento.
+    """
+    from app.models.db_models import DocumentoLibreria, DocumentoVersion
+    doc_res = await db.execute(select(DocumentoLibreria).where(DocumentoLibreria.id == documento_id))
+    doc = doc_res.scalars().first()
+    if not doc or doc.workspace_id != user.workspace_id:
+        raise HTTPException(status_code=404, detail="Documento no encontrado o sin acceso")
+
+    stmt = select(DocumentoVersion).where(DocumentoVersion.documento_id == documento_id).order_by(DocumentoVersion.version.desc())
+    versiones = (await db.execute(stmt)).scalars().all()
+    return versiones
+
+@router.post("/{documento_id}/control-previo")
+async def control_previo_firma(
+    documento_id: int,
+    db: AsyncSession = Depends(get_db),
+    user = Depends(get_current_user)
+):
+    """
+    Simula el motor de Alertas de Control Previo (cotejo registral, cláusulas faltantes).
+    Extrae el texto del documento y llama al LLM para analizar inconsistencias.
+    """
+    from app.models.db_models import DocumentoLibreria
+    from app.rag.rag_service import _extract_text
+    from app.core.config import get_settings
+    from langchain_ollama import ChatOllama
+    import os
+
+    doc_res = await db.execute(select(DocumentoLibreria).where(DocumentoLibreria.id == documento_id))
+    doc = doc_res.scalars().first()
+    if not doc or doc.workspace_id != user.workspace_id:
+        raise HTTPException(status_code=404, detail="Documento no encontrado o sin acceso")
+    
+    if not os.path.exists(doc.path):
+         raise HTTPException(status_code=404, detail="Archivo físico no encontrado")
+
+    texto = _extract_text(doc.path, None, os.path.basename(doc.path))
+    
+    # Usar LLM para detectar cláusulas faltantes
+    settings = get_settings()
+    llm = ChatOllama(model=settings.ollama_llm_model, base_url=settings.ollama_base_url, temperature=0, format="json")
+    
+    prompt = f"""
+    Eres un Escribano Revisor. Analiza este documento notarial y genera un informe estructurado de "Control Previo a la Firma".
+    
+    REGLAS ESTRICTAS:
+    - Debes detectar si faltan cláusulas obligatorias según la normativa argentina (ej. Origen de fondos UIF, Asentimiento conyugal si corresponde, Asentimiento de convivencia, Lectura de derechos).
+    - Revisa discrepancias entre las partes mencionadas.
+    - Devuelve estrictamente un JSON válido.
+
+    EJEMPLO DE SALIDA JSON:
+    {{
+      "alertas": ["Falta declaración jurada sobre si es Persona Expuesta Políticamente (PEP).", "Falta justificación de origen de fondos."],
+      "verificaciones_exitosas": ["Comparecencia correcta.", "Fe de conocimiento cumplida."]
+    }}
+    
+    TEXTO DEL DOCUMENTO A REVISAR:
+    {texto[:10000]}
+    """
+    
+    try:
+        resultado = await llm.ainvoke(prompt)
+        import json
+        return json.loads(resultado.content)
+    except Exception as e:
+        return {"error": "Fallo en el control previo automatizado", "detalle": str(e)}

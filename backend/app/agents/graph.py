@@ -14,6 +14,18 @@ from app.services.extraction_service import ExtractorService
 from app.core.database import AsyncSessionLocal
 from app.agents.asesor_agent import node_asesor_notarial
 
+async def _get_history(llm_svc, messages) -> List[Dict[str, str]]:
+    history = [{"role": "user" if getattr(msg, 'type', 'user') == "human" else "assistant", "content": msg.content} for msg in messages[:-1]]
+    if len(history) > 6:
+        logger.info("[Agente Memoria] Historial largo detectado. Comprimiendo memoria para proteger VRAM...")
+        resumen = await llm_svc.chat(
+            query="Resume esta conversación de forma ultra-concisa, manteniendo únicamente los hechos notariales, nombres, documentos mencionados y el estado del trámite.", 
+            history=history, 
+            tags=["chat_internal"]
+        )
+        history = [{"role": "assistant", "content": f"[RESUMEN DE MEMORIA PASADA]: {resumen}"}]
+    return history
+
 # ==================================================================
 # Singletons — servicios pesados se crean una única vez por proceso
 # ==================================================================
@@ -137,7 +149,7 @@ async def node_redactar_certificacion(state: CertificacionState, config: dict) -
         contexto += f"\n\n[AJUSTE REQUERIDO POR VALIDADOR]: {state['feedback_legal']}"
     
     query = state["messages"][-1].content if state["messages"] else ""
-    history = [{"role": "user" if getattr(msg, 'type', 'user') == "human" else "assistant", "content": msg.content} for msg in state["messages"][:-1]]
+    history = await _get_history(llm_svc, state["messages"])
     
     borrador = await llm_svc.chat(query=query, history=history, contexto_legal=contexto, tags=["chat_stream"])
     return {"texto_generado": borrador, "intentos": state.get("intentos", 0) + 1}
@@ -170,31 +182,43 @@ async def node_redactar_escritura(state: CertificacionState, config: dict) -> di
     modelo_override = config.get("configurable", {}).get("modelo_ia")
     llm_svc = LLMService(modelo_override=modelo_override)
     
+    # Fetch jurisdicción from DB
+    jurisdiccion = "CABA" # Fallback
+    tenant_id_raw = state.get("tenant_id", 1)
+    try:
+        workspace_id = int(tenant_id_raw)
+        async with AsyncSessionLocal() as db:
+            from app.models.db_models import Workspace
+            stmt = select(Workspace).where(Workspace.id == workspace_id)
+            res = await db.execute(stmt)
+            ws = res.scalar_one_or_none()
+            if ws and ws.jurisdiccion:
+                jurisdiccion = ws.jurisdiccion
+    except Exception as e:
+        logger.warning(f"Error buscando jurisdiccion: {e}")
+
     contexto = state.get("contexto_legal", "")
-    contexto += "\n\n[INSTRUCCIÓN ESTRICTA MEGA PROFESIONAL]: Estás redactando una Escritura Pública para CABA. DEBES incluir obligatoriamente y redactar de forma rigurosa las cláusulas de origen de fondos (UIF), retención impositiva (AFIP/ITI/Ganancias/Sellos), y mención de Certificados de Dominio e Inhibición (RPI) con sus números. No omitas ninguna cláusula de estilo notarial."
+    contexto += f"\n\n[INSTRUCCIÓN ESTRICTA MEGA PROFESIONAL]: Estás redactando una Escritura Pública para {jurisdiccion}. DEBES incluir obligatoriamente y redactar de forma rigurosa las cláusulas de origen de fondos (UIF), retención impositiva (según corresponda a {jurisdiccion}), y mención de Certificados de Dominio e Inhibición (RPI) con sus números. No omitas ninguna cláusula de estilo notarial."
     if state.get("feedback_legal"):
         contexto += f"\n\n[CORRECCIÓN EXIGIDA POR AUDITORÍA RIGUROSA]: {state['feedback_legal']}"
     
     query = state["messages"][-1].content if state["messages"] else ""
-    history = [{"role": "user" if getattr(msg, 'type', 'user') == "human" else "assistant", "content": msg.content} for msg in state["messages"][:-1]]
+    history = await _get_history(llm_svc, state["messages"])
     
     borrador = await llm_svc.chat(query=query, history=history, contexto_legal=contexto, tags=["chat_stream"])
     return {"texto_generado": borrador, "intentos": state.get("intentos", 0) + 1}
 
-async def node_validar_escritura_rigurosa(state: CertificacionState) -> dict:
-    """Validador Mega Profesional para Escrituras CABA."""
-    logger.info("[Validador Escrituras] Auditando Cumplimiento UIF/AFIP/Registros...")
-    texto = state["texto_generado"].upper()
-    criticas = []
+async def node_validar_escritura_rigurosa(state: CertificacionState, config: dict) -> dict:
+    """Validador Inteligente (LLM-as-a-Judge) para Escrituras."""
+    logger.info("[Validador Escrituras] Auditando Cumplimiento UIF/AFIP/Registros con IA...")
     
-    if "UIF" not in texto and "FONDOS" not in texto and "LAVADO" not in texto:
-        criticas.append("FALTA CLÁUSULA UIF: Declaración jurada obligatoria de origen de fondos lícitos y condición de Persona Expuesta Políticamente (PEP).")
-    if "AFIP" not in texto and "COTI" not in texto and "RETENCIÓN" not in texto and "IMPUESTO" not in texto and "ITI" not in texto and "GANANCIAS" not in texto and "SELLOS" not in texto:
-        criticas.append("FALTA CLÁUSULA IMPOSITIVA: Constancia obligatoria de retención de impuestos AFIP (ITI/Ganancias) o AGIP (Sellos CABA) o su exención.")
-    if "CERTIFICADO" not in texto and "DOMINIO" not in texto and "INHIBICIÓN" not in texto:
-        criticas.append("FALTAN CERTIFICADOS REGISTRALES: Mención indispensable de los certificados de dominio e inhibiciones expedidos por el RPI (Registro de la Propiedad Inmueble).")
+    modelo_override = config.get("configurable", {}).get("modelo_ia")
+    llm_svc = LLMService(modelo_override=modelo_override)
     
-    if criticas and state.get("intentos", 0) < 3:
+    resultado = await llm_svc.validar_escritura_ia(state["texto_generado"])
+    
+    if not resultado.get("aprobado") and state.get("intentos", 0) < 3:
+        criticas = resultado.get("criticas", [])
         logger.warning(f"[Validador Escrituras] Rechazado por omisiones graves: {criticas}")
         return {
             "aprobado": False, 
@@ -202,7 +226,7 @@ async def node_validar_escritura_rigurosa(state: CertificacionState) -> dict:
             "requiere_uif": True
         }
     
-    logger.info("[Validador Escrituras] Aprobado. Cumple estándares mega profesionales CABA.")
+    logger.info("[Validador Escrituras] Aprobado por el Juez IA.")
     return {"aprobado": True, "feedback_legal": None}
 
 # ============================================================
@@ -216,7 +240,7 @@ async def node_chat_general(state: CertificacionState, config: dict) -> dict:
     
     contexto = state.get("contexto_legal", "")
     query = state["messages"][-1].content if state["messages"] else ""
-    history = [{"role": "user" if getattr(msg, 'type', 'user') == "human" else "assistant", "content": msg.content} for msg in state["messages"][:-1]]
+    history = await _get_history(llm_svc, state["messages"])
     
     borrador = await llm_svc.chat(query=query, history=history, contexto_legal=contexto, tags=["chat_stream"])
     return {"texto_generado": borrador, "aprobado": True}

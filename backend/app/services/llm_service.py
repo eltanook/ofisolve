@@ -493,6 +493,55 @@ class LLMService:
                 "criticas": [f"Error de auditoría AI: {str(e)}. Fallback manual activado."]
             }
 
+    async def validar_escritura_ia(self, borrador: str) -> Dict[str, Any]:
+        """
+        Usa Ollama para auditar una ESCRITURA completa (LLM-as-a-Judge).
+        Busca UIF, AFIP, ITI, Sellos y Registros.
+        """
+        if self._mock_mode:
+            return {"aprobado": True, "criticas": []}
+
+        from pydantic import BaseModel, Field
+        class ValidacionEscritura(BaseModel):
+            cumple_uif: bool = Field(description="True si menciona origen de fondos o Persona Expuesta Políticamente (UIF/Lavado).")
+            cumple_impositivo: bool = Field(description="True si menciona retenciones o exenciones de AFIP, ITI, Ganancias o Sellos.")
+            cumple_registral: bool = Field(description="True si menciona certificados de Dominio e Inhibiciones expedidos por el RPI.")
+            motivo_rechazo: Optional[str] = Field(description="Si alguno de los anteriores es False, explicar brevemente qué falta. Si todos son True, dejar en blanco.")
+
+        try:
+            validador = self._llm.with_structured_output(ValidacionEscritura)
+            prompt = f"""
+            Eres un Auditor Notarial Experto. Revisa la siguiente Escritura y determina si cumple los requisitos legales:
+            1. UIF (Origen de fondos lícitos, Persona Expuesta Políticamente).
+            2. IMPOSITIVO (Constancia de retención o exención AFIP, ITI, Ganancias, Sellos).
+            3. REGISTRAL (Mención de certificados de Dominio e Inhibición del RPI).
+            
+            Escritura:
+            {borrador}
+            """
+            
+            resultado: ValidacionEscritura = await validador.ainvoke(prompt)
+            
+            criticas = []
+            if not resultado.cumple_uif: criticas.append("Falta cláusula UIF/Origen de Fondos.")
+            if not resultado.cumple_impositivo: criticas.append("Falta cláusula Impositiva (AFIP/Sellos/ITI).")
+            if not resultado.cumple_registral: criticas.append("Faltan Certificados Registrales (Dominio/Inhibición).")
+            if resultado.motivo_rechazo and not criticas: criticas.append(resultado.motivo_rechazo)
+            
+            aprobado = resultado.cumple_uif and resultado.cumple_impositivo and resultado.cumple_registral
+            
+            return {
+                "aprobado": aprobado,
+                "criticas": criticas
+            }
+        except Exception as e:
+            logger.error(f"Error en Validador LLM-as-a-Judge: {str(e)}")
+            # Fallback seguro
+            return {
+                "aprobado": False,
+                "criticas": [f"Error de auditoría AI: {str(e)}"]
+            }
+
     def _generar_mock(
         self,
         datos_ofuscados: Dict[str, str],

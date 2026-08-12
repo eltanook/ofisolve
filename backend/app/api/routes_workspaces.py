@@ -55,6 +55,24 @@ async def create_workspace(request: Request, workspace: WorkspaceCreate, db: Asy
     await db.refresh(nuevo)
     return nuevo
 
+@router.patch("/{id}", response_model=WorkspaceResponse)
+@limiter.limit("20/minute")
+async def update_workspace(request: Request, id: int, workspace_update: dict, db: AsyncSession = Depends(get_db)):
+    """Actualiza un workspace de forma parcial (ej: jurisdiccion, nombre)."""
+    result = await db.execute(select(Workspace).filter(Workspace.id == id))
+    db_ws = result.scalars().first()
+    if not db_ws:
+        raise HTTPException(status_code=404, detail="Workspace no encontrado")
+    
+    allowed = {"nombre", "descripcion", "jurisdiccion", "modelo_ia"}
+    for key, value in workspace_update.items():
+        if key in allowed and hasattr(db_ws, key):
+            setattr(db_ws, key, value)
+    
+    await db.commit()
+    await db.refresh(db_ws)
+    return db_ws
+
 # ==========================================================
 # TRAMITES
 # ==========================================================

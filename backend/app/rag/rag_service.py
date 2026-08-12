@@ -46,13 +46,28 @@ def _extract_text(file_path: str, content_bytes: bytes, filename: str) -> str:
     if ext == "pdf":
         try:
             import fitz  # PyMuPDF
-            import io
             doc = fitz.open(stream=content_bytes, filetype="pdf")
-            return "\n".join(page.get_text() for page in doc)
-        except ImportError:
-            logger.warning("PyMuPDF no disponible — fallback a UTF-8 decode")
+            extracted_text = "\n".join(page.get_text() for page in doc)
+            
+            # Si el texto es muy corto (probablemente un PDF escaneado) -> Fallback a OCR
+            if len(extracted_text.strip().split()) < 30:
+                logger.info(f"Texto extraído nativamente muy corto ({len(extracted_text.split())} palabras). Activando OCR Local...")
+                import pytesseract
+                from pdf2image import convert_from_bytes
+                
+                # Para Windows, a veces es necesario especificar la ruta. Asumimos que está en el PATH.
+                images = convert_from_bytes(content_bytes)
+                ocr_text = []
+                for i, img in enumerate(images):
+                    text = pytesseract.image_to_string(img, lang='spa')
+                    ocr_text.append(text)
+                return "\n".join(ocr_text)
+            
+            return extracted_text
+        except ImportError as e:
+            logger.warning(f"Librería faltante para PDF o OCR: {e} — fallback a UTF-8 decode")
         except Exception as e:
-            logger.warning(f"Error extrayendo PDF: {e}")
+            logger.warning(f"Error extrayendo PDF o ejecutando OCR: {e}")
 
     elif ext in ("docx", "doc"):
         try:

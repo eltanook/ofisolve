@@ -4,7 +4,7 @@ import React from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Palette, User, Bell, Moon, Sun } from "lucide-react";
+import { Palette, User, Bell, Moon, Sun, FileText } from "lucide-react";
 import { useTheme } from "next-themes";
 
 interface ConfiguracionModalProps {
@@ -12,9 +12,11 @@ interface ConfiguracionModalProps {
   onOpenChange: (open: boolean) => void;
   onOpenPerfil: () => void;
   onOpenContrasena: () => void;
+  workspaceActual?: any;
+  onUpdateJurisdiccion?: (val: string) => void;
 }
 
-export function ConfiguracionModal({ open, onOpenChange, onOpenPerfil, onOpenContrasena }: ConfiguracionModalProps) {
+export function ConfiguracionModal({ open, onOpenChange, onOpenPerfil, onOpenContrasena, workspaceActual, onUpdateJurisdiccion }: ConfiguracionModalProps) {
   const [tabConfiguracion, setTabConfiguracion] = React.useState("apariencia");
   const { theme, setTheme } = useTheme();
 
@@ -35,7 +37,7 @@ export function ConfiguracionModal({ open, onOpenChange, onOpenPerfil, onOpenCon
         </DialogHeader>
 
         <Tabs value={tabConfiguracion} onValueChange={setTabConfiguracion}>
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="apariencia">
               <Palette className="mr-2 h-4 w-4" />
               Apariencia
@@ -44,6 +46,12 @@ export function ConfiguracionModal({ open, onOpenChange, onOpenPerfil, onOpenCon
               <User className="mr-2 h-4 w-4" />
               Cuenta
             </TabsTrigger>
+            {workspaceActual && (
+              <TabsTrigger value="workspace">
+                <FileText className="mr-2 h-4 w-4" />
+                Workspace
+              </TabsTrigger>
+            )}
           </TabsList>
 
           {/* Tab: Apariencia */}
@@ -110,6 +118,29 @@ export function ConfiguracionModal({ open, onOpenChange, onOpenPerfil, onOpenCon
             </div>
           </TabsContent>
 
+          {/* Tab: Workspace */}
+          {workspaceActual && onUpdateJurisdiccion && (
+            <TabsContent value="workspace" className="mt-4 space-y-4">
+              <div className="flex flex-col space-y-2 rounded-lg border border-border p-3">
+                <p className="text-sm font-medium text-foreground">Jurisdicción de la IA ({workspaceActual.nombre})</p>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Define bajo qué normativas provinciales redactará y auditará el asistente.
+                </p>
+                <select 
+                  className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  value={workspaceActual.jurisdiccion || "CABA"}
+                  onChange={(e) => onUpdateJurisdiccion(e.target.value)}
+                >
+                  <option value="CABA">CABA (Ciudad Autónoma de Buenos Aires)</option>
+                  <option value="Provincia de Buenos Aires">Provincia de Buenos Aires</option>
+                  <option value="Córdoba">Córdoba</option>
+                  <option value="Santa Fe">Santa Fe</option>
+                  <option value="Mendoza">Mendoza</option>
+                  <option value="Nacional">Nacional (Genérico)</option>
+                </select>
+              </div>
+            </TabsContent>
+          )}
 
         </Tabs>
 

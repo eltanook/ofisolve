@@ -1,6 +1,6 @@
 import os
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from loguru import logger
@@ -17,10 +17,41 @@ UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
+def _indexar_background(
+    tramite_id: Optional[int], 
+    doc_id: int, 
+    content: bytes, 
+    filename: str, 
+    tipo: str
+):
+    """Tarea sincrónica para ejecutar el RAG en segundo plano."""
+    try:
+        rag_service = RAGService()
+        if tramite_id:
+            chunks = rag_service.indexar_documento_tramite(
+                tramite_id=tramite_id,
+                doc_id=doc_id,
+                contenido_bytes=content,
+                nombre=filename,
+                tipo_doc=tipo,
+            )
+            logger.info(f"Fondo: Documento '{filename}' indexado: {chunks} chunks.")
+        else:
+            from app.rag.rag_service import _extract_text
+            texto = _extract_text("", content, filename)
+            rag_service.agregar_documento_dinamico(
+                contenido=texto,
+                nombre=filename,
+                tipo_doc=tipo,
+            )
+            logger.info(f"Fondo: Documento '{filename}' agregado a RAG global.")
+    except Exception as e:
+        logger.error(f"Fondo: Error indexando RAG: {e}")
 
 @router.post("/{workspace_id}/documentos", response_model=documento_schemas.DocumentoLibreriaResponse)
 async def upload_documento(
     workspace_id: int,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     tramite_id: Optional[int] = Form(default=None),
     db: AsyncSession = Depends(get_db),
@@ -53,30 +84,15 @@ async def upload_documento(
     await db.commit()
     await db.refresh(db_doc)
 
-    # 4. (A+E) Indexar en RAG — con extracción real de texto
-    try:
-        rag_service = RAGService()
-        if tramite_id:
-            # (A+D) Colección específica del trámite
-            chunks_indexados = rag_service.indexar_documento_tramite(
-                tramite_id=tramite_id,
-                doc_id=db_doc.id,
-                contenido_bytes=content,
-                nombre=file.filename,
-                tipo_doc=db_doc.tipo,
-            )
-            logger.info(f"Documento '{file.filename}' indexado: {chunks_indexados} chunks en tramite_{tramite_id}")
-        else:
-            # Fallback a colección global
-            from app.rag.rag_service import _extract_text
-            texto = _extract_text("", content, file.filename)
-            rag_service.agregar_documento_dinamico(
-                contenido=texto,
-                nombre=file.filename,
-                tipo_doc=db_doc.tipo,
-            )
-    except Exception as e:
-        logger.warning(f"Error indexando en RAG (no crítico): {e}")
+    # 4. (A+E) Indexar en RAG (En segundo plano)
+    background_tasks.add_task(
+        _indexar_background,
+        tramite_id=tramite_id,
+        doc_id=db_doc.id,
+        content=content,
+        filename=file.filename,
+        tipo=db_doc.tipo
+    )
 
     return db_doc
 

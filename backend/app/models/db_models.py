@@ -59,6 +59,7 @@ class Workspace(Base):
     moneda_defecto: Mapped[Optional[str]] = mapped_column(String(10), default="ARS")
     iva_defecto: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), default=21.0)
     modelo_ia: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    jurisdiccion: Mapped[Optional[str]] = mapped_column(String(100), default="CABA")
     fecha_creacion: Mapped[datetime.datetime] = mapped_column(default=datetime.datetime.utcnow)
     
     tramites: Mapped[List["Tramite"]] = relationship(back_populates="workspace", cascade="all, delete")
@@ -98,6 +99,24 @@ class DocumentoLibreria(Base):
     tramite: Mapped[Optional["Tramite"]] = relationship(back_populates="documentos")
     mensajes_chat: Mapped[List["MensajeChat"]] = relationship(back_populates="documento", cascade="all, delete, delete-orphan")
     locked_by: Mapped[Optional["Usuario"]] = relationship()
+    versiones: Mapped[List["DocumentoVersion"]] = relationship(back_populates="documento", cascade="all, delete, delete-orphan")
+
+class DocumentoVersion(Base):
+    """
+    Control de versiones inmutable para documentos, permitiendo auditoría y comparación de cambios.
+    """
+    __tablename__ = "documento_versiones"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    documento_id: Mapped[int] = mapped_column(ForeignKey("documentos_libreria.id", ondelete="CASCADE"), index=True)
+    autor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    comentario: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    path_archivo: Mapped[str] = mapped_column(String(255))
+    timestamp: Mapped[datetime.datetime] = mapped_column(default=datetime.datetime.utcnow)
+
+    documento: Mapped["DocumentoLibreria"] = relationship(back_populates="versiones")
+    autor: Mapped[Optional["Usuario"]] = relationship()
 
 class EquipoMiembro(Base):
     __tablename__ = "equipo_miembros"

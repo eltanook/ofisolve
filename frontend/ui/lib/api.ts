@@ -122,6 +122,10 @@ class OfiSolveApi {
     return this.request("/workspaces/", { method: "POST", body: JSON.stringify(data) });
   }
 
+  async actualizarWorkspace(id: number, data: { nombre?: string; descripcion?: string; jurisdiccion?: string }): Promise<any> {
+    return this.request(`/workspaces/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+  }
+
   // --- TRAMITES ---
   async obtenerTramites(workspaceId: number): Promise<any[]> {
     return this.request(`/workspaces/${workspaceId}/tramites`);
