@@ -243,8 +243,8 @@ class Tramite(Base):
     participaciones: Mapped[List["Participacion"]] = relationship(back_populates="tramite", cascade="all, delete, delete-orphan")
     documentos: Mapped[List["DocumentoLibreria"]] = relationship(back_populates="tramite", cascade="all, delete, delete-orphan")
     mensajes_chat: Mapped[List["MensajeChat"]] = relationship(back_populates="tramite", cascade="all, delete, delete-orphan")
-    
     operaciones: Mapped[List["TramiteOperacion"]] = relationship(back_populates="tramite", cascade="all, delete-orphan")
+    escrituras: Mapped[List["EscrituraProtocolo"]] = relationship(back_populates="tramite", cascade="all, delete, delete-orphan")
 
 class TramiteOperacion(Base):
     """
@@ -259,6 +259,28 @@ class TramiteOperacion(Base):
     tramite: Mapped["Tramite"] = relationship(back_populates="operaciones")
     operacion_catalogo: Mapped["CatalogoOperacion"] = relationship(back_populates="tramites_vinculados")
 
+class EscrituraProtocolo(Base):
+    """
+    Registro formal de una Escritura Pública en el Protocolo Notarial.
+    Permite generar el Índice Anual de Protocolo exigido por Ley.
+    """
+    __tablename__ = "escrituras_protocolo"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    workspace_id: Mapped[int] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    tramite_id: Mapped[int] = mapped_column(ForeignKey("tramites.id"), index=True)
+    
+    numero_escritura: Mapped[int] = mapped_column(Integer, index=True)
+    anio: Mapped[int] = mapped_column(Integer, index=True)
+    tomo: Mapped[int] = mapped_column(Integer)
+    folio_inicio: Mapped[int] = mapped_column(Integer)
+    folio_fin: Mapped[int] = mapped_column(Integer)
+    tipo_acto: Mapped[str] = mapped_column(String(200))
+    fecha_otorgamiento: Mapped[datetime.datetime] = mapped_column(default=datetime.datetime.utcnow)
+    observaciones: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    workspace: Mapped["Workspace"] = relationship()
+    tramite: Mapped["Tramite"] = relationship(back_populates="escrituras")
 
 class Participacion(Base):
     __tablename__ = "participaciones"
@@ -611,6 +633,7 @@ class PlantillaModelo(Base):
     nombre: Mapped[str] = mapped_column(String(200), index=True)
     categoria: Mapped[str] = mapped_column(String(50))  # escritura | certificacion | poder | acta | otro
     contenido: Mapped[str] = mapped_column(Text)  # Contenido del modelo/template
+    campos_requeridos: Mapped[Optional[str]] = mapped_column(Text, nullable=True) # JSON schema para validación estructurada de la plantilla
     descripcion: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     es_favorito: Mapped[bool] = mapped_column(Boolean, default=False)
     uso_count: Mapped[int] = mapped_column(Integer, default=0)  # Contador de usos

@@ -102,7 +102,48 @@ async def stream_chat_sesion(session_id: int, payload: dict, db: AsyncSession = 
     history = payload.get("history", [])
     fuentes_ids = payload.get("fuentes_ids", [])
     
-    # Cargar contenido de fuentes si se enviaron
+    # --- 1. CARGA DE CONTEXTO DE SCOPE ACTIVO (TRAMITE/GLOBAL) ---
+    stmt_sesion = select(ChatSession).where(ChatSession.id == session_id)
+    res_sesion = await db.execute(stmt_sesion)
+    sesion_db = res_sesion.scalars().first()
+    
+    contexto_tramite = ""
+    if sesion_db and sesion_db.tipo and sesion_db.tipo.startswith("tramite_"):
+        try:
+            tramite_id_str = sesion_db.tipo.split("_")[1]
+            tramite_id_ctx = int(tramite_id_str)
+            from app.models.db_models import Tramite, Participacion, Cliente
+            from sqlalchemy.orm import joinedload
+            
+            stmt_t = select(Tramite).options(joinedload(Tramite.cliente)).where(Tramite.id == tramite_id_ctx)
+            res_t = await db.execute(stmt_t)
+            t = res_t.scalars().first()
+            if t:
+                # Cargar participantes
+                stmt_p = select(Participacion, Cliente).join(Cliente, Participacion.cliente_id == Cliente.id).where(Participacion.tramite_id == tramite_id_ctx)
+                res_p = await db.execute(stmt_p)
+                parts = []
+                for p, c in res_p.all():
+                    parts.append(f"- {c.nombre_completo} (Rol: {p.rol}) - DNI: {c.dni}")
+                parts_str = "\n".join(parts) if parts else "Ninguno extra."
+                
+                cliente_titular = f"{t.cliente.nombre_completo} (DNI: {t.cliente.dni})" if t.cliente else "Desconocido"
+                
+                contexto_tramite = f"""
+--- CONTEXTO ESTRICTO DEL TRÁMITE ACTUAL ---
+Estás chateando dentro de la carpeta del trámite ID: {t.id}
+Nombre: {t.nombre}
+Tipo de Acto: {t.tipo}
+Estado: {t.estado}
+Cliente Titular: {cliente_titular}
+Participantes/Intervinientes:
+{parts_str}
+--------------------------------------------
+"""
+        except Exception as e:
+            logger.error(f"Error inyectando contexto de trámite en chat: {e}")
+            
+    # --- 2. CARGA DE FUENTES ---
     texto_fuentes = ""
     if fuentes_ids:
         from app.models.db_models import DocumentoLibreria
@@ -129,10 +170,14 @@ async def stream_chat_sesion(session_id: int, payload: dict, db: AsyncSession = 
             messages.append(AIMessage(content=msg["contenido"]))
     
     # Agregar el nuevo mensaje con las fuentes si existen
+    partes_mensaje = []
+    if contexto_tramite:
+        partes_mensaje.append(contexto_tramite)
     if texto_fuentes:
-        mensaje_final = f"{texto_fuentes}\n{mensaje_texto}"
-    else:
-        mensaje_final = mensaje_texto
+        partes_mensaje.append(texto_fuentes)
+        
+    partes_mensaje.append(mensaje_texto)
+    mensaje_final = "\n\n".join(partes_mensaje)
         
     messages.append(HumanMessage(content=mensaje_final))
 

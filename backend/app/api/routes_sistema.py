@@ -17,22 +17,14 @@ async def obtener_modelos():
                 # Excluir modelos de embeddings conocidos que no soportan chat
                 modelos = [m for m in modelos_raw if "bge-m3" not in m.lower() and "embed" not in m.lower()]
                 
-                # Priorizar el modelo más potente (Llama) por sobre Qwen para que sea el default
-                def get_power_score(m):
-                    name = m.lower()
-                    if "llama3" in name or "llama-3" in name:
-                        return 100
-                    if "llama" in name:
-                        return 90
-                    if "qwen" in name:
-                        return 50
-                    return 0
-                
-                modelos.sort(key=get_power_score, reverse=True)
+                # Asegurar que el modelo principal esté de primero si está presente
+                if settings.llm_model in modelos:
+                    modelos.remove(settings.llm_model)
+                    modelos.insert(0, settings.llm_model)
                 
                 return {"modelos": modelos}
     except Exception:
         pass
     
     # Fallback default models if Ollama fails to respond
-    return {"modelos": ["llama3.1", "qwen2.5"]}
+    return {"modelos": [settings.llm_model]}

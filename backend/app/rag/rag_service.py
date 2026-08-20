@@ -52,22 +52,29 @@ def _extract_text(file_path: str, content_bytes: bytes, filename: str) -> str:
             # Si el texto es muy corto (probablemente un PDF escaneado) -> Fallback a OCR
             if len(extracted_text.strip().split()) < 30:
                 logger.info(f"Texto extraído nativamente muy corto ({len(extracted_text.split())} palabras). Activando OCR Local...")
-                import pytesseract
-                from pdf2image import convert_from_bytes
-                
-                # Para Windows, a veces es necesario especificar la ruta. Asumimos que está en el PATH.
-                images = convert_from_bytes(content_bytes)
-                ocr_text = []
-                for i, img in enumerate(images):
-                    text = pytesseract.image_to_string(img, lang='spa')
-                    ocr_text.append(text)
-                return "\n".join(ocr_text)
+                try:
+                    import pytesseract
+                    from pdf2image import convert_from_bytes
+                    
+                    # Para Windows, a veces es necesario especificar la ruta. Asumimos que está en el PATH.
+                    images = convert_from_bytes(content_bytes)
+                    ocr_text = []
+                    for i, img in enumerate(images):
+                        text = pytesseract.image_to_string(img, lang='spa')
+                        ocr_text.append(text)
+                    return "\n".join(ocr_text)
+                except FileNotFoundError as e:
+                    logger.warning(f"OCR no ejecutado: Faltan binarios de sistema (Tesseract o Poppler) - {e}. Fallback a texto corto.")
+                    return extracted_text
+                except Exception as e:
+                    logger.warning(f"OCR falló de forma imprevista: {e}. Fallback a texto corto.")
+                    return extracted_text
             
             return extracted_text
         except ImportError as e:
-            logger.warning(f"Librería faltante para PDF o OCR: {e} — fallback a UTF-8 decode")
+            logger.warning(f"Librería faltante para PDF (PyMuPDF): {e} — fallback a UTF-8 decode")
         except Exception as e:
-            logger.warning(f"Error extrayendo PDF o ejecutando OCR: {e}")
+            logger.warning(f"Error procesando PDF nativo: {e}")
 
     elif ext in ("docx", "doc"):
         try:

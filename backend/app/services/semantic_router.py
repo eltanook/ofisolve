@@ -52,7 +52,7 @@ class SemanticRouter:
                 res = await client.post(
                     f"{settings.ollama_base_url}/api/generate",
                     json={
-                        "model": "llama3.2",
+                        "model": settings.llm_model,
                         "prompt": prompt,
                         "stream": False,
                         "options": {"temperature": 0.1, "num_ctx": 256}
@@ -89,7 +89,7 @@ Asistente: {respuesta_ia[-500:]}"""
                 res = await client.post(
                     f"{settings.ollama_base_url}/api/generate",
                     json={
-                        "model": "llama3.2",
+                        "model": settings.llm_model,
                         "prompt": prompt,
                         "stream": False,
                         "format": "json",
